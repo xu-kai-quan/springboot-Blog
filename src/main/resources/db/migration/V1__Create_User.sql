@@ -1,7 +1,8 @@
 create table user(
-    id                      bigint primary key auto_increment,
-    username                varchar(100)  UNIQUE,
-    encrypted_password      varchar(100),
-    create_at               datetime,
-    updated_at              datetime
+	id int auto_increment primary key,
+	username varchar(10) UNIQUE,
+	encrypted_password varchar(100),
+	avatar varchar(100),
+	created_at datetime,
+	updated_at datetime
 )
