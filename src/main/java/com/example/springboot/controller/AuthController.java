@@ -1,7 +1,9 @@
 package com.example.springboot.controller;
 
+import com.example.springboot.entity.LoginResult;
 import com.example.springboot.entity.Result;
 import com.example.springboot.entity.User;
+import com.example.springboot.service.AuthService;
 import com.example.springboot.service.UserService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -19,107 +21,90 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseBody;
 
 import javax.inject.Inject;
+import javax.servlet.http.HttpServletRequest;
+import java.util.Collections;
 import java.util.Map;
 
 @Controller
 public class AuthController {
-    private UserService userService;
-    private AuthenticationManager authenticationManager;
+    private final UserService userService;
+    private final AuthenticationManager authenticationManager;
+    private final AuthService authService;
 
     @Inject
-    public AuthController(UserService userService, AuthenticationManager authenticationManager) {
-        this.authenticationManager = authenticationManager;
+    public AuthController(UserService userService,
+                          AuthenticationManager authenticationManager,
+                          AuthService authService) {
         this.userService = userService;
+        this.authenticationManager = authenticationManager;
+        this.authService = authService;
     }
 
-    @GetMapping(value = "/auth",produces = "application/json; charset=utf-8")
+    @GetMapping("/auth")
     @ResponseBody
-    public Object auth(ModelMap map) {
-
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-
-        User loggedInUser = userService.getUserByUsername(authentication == null ? null : authentication.getName());
-
-        if (loggedInUser == null) {
-            return new Result("ok", "用户没有登录", false);
-        } else {
-            return new Result("ok", null, true, loggedInUser);
-        }
+    public LoginResult auth() {
+        return authService.getCurrentUser()
+                .map(LoginResult::success)
+                .orElse(LoginResult.success("用户没有登录", false));
     }
 
     @GetMapping("/auth/logout")
     @ResponseBody
-    public Object logout() {
-        String username = SecurityContextHolder.getContext().getAuthentication().getName();
-
-        User loggedInUser = userService.getUserByUsername(username);
-
-        if (loggedInUser == null) {
-            return Result.failure("用户没有登录");
-
-        } else {
-            SecurityContextHolder.clearContext();
-            return new Result("ok", "注销成功", false);
-        }
+    public LoginResult logout() {
+        LoginResult ret = authService.getCurrentUser()
+                .map(user -> LoginResult.success("success", false))
+                .orElse(LoginResult.failure("用户没有登录"));
+        SecurityContextHolder.clearContext();
+        return ret;
     }
 
-    @PostMapping("auth/register")
+    @PostMapping("/auth/register")
     @ResponseBody
-    public Result register(@RequestBody Map<String, String> usernameAndPassword) {
-        String username = usernameAndPassword.get("username");
-        String password = usernameAndPassword.get("password");
+    public LoginResult register(@RequestBody Map<String, Object> usernameAndPassword, HttpServletRequest request) {
+        String username = (String) usernameAndPassword.get("username");
+        String password = (String) usernameAndPassword.get("password");
         if (username == null || password == null) {
-            return Result.failure("username/password ==null");
+            return LoginResult.failure("username/password == null");
         }
         if (username.length() < 1 || username.length() > 15) {
-            return Result.failure("invalid username");
+            return LoginResult.failure("invalid username");
         }
-        if (password.length() < 6 || password.length() > 16) {
-            return Result.failure("invalid password");
+        if (password.length() < 1 || password.length() > 15) {
+            return LoginResult.failure("invalid password");
         }
+
         try {
             userService.save(username, password);
         } catch (DuplicateKeyException e) {
-            return Result.failure("user already exist");
+            return LoginResult.failure("user already exists");
         }
-        return new Result("ok", "success!", false);
-
-//        User user = userService.getUserByUsername(username);
-        //        if (user == null) {
-//            userService.save(username, password);
-//            return new Result("ok", "success!", false);
-//        } else {
-//            return new Result("fail","user already exist",false);
-//        }
-
-
+        login(usernameAndPassword, request);
+        return LoginResult.success("注册成功", userService.getUserByUsername(username));
     }
 
-    @PostMapping(value = "/auth/login",produces = "application/json; charset=utf-8")
+    @PostMapping("/auth/login")
     @ResponseBody
-    public Result login(@RequestBody Map<String, Object> usernameAndPassword) {
+    public Object login(@RequestBody Map<String, Object> usernameAndPassword, HttpServletRequest request) {
+        if (request.getHeader("user-agent") == null || !request.getHeader("user-agent").contains("Mozilla")) {
+            return "死爬虫去死吧";
+        }
+
         String username = usernameAndPassword.get("username").toString();
         String password = usernameAndPassword.get("password").toString();
-        UserDetails userDetails;
-        try {
-            userDetails = userService.loadUserByUsername(username);
-        } catch (UsernameNotFoundException e) {
-            return Result.failure("用户不存在");
-        }
-        UsernamePasswordAuthenticationToken token = new UsernamePasswordAuthenticationToken(userDetails, password, userDetails.getAuthorities());
+
+        UsernamePasswordAuthenticationToken token = new UsernamePasswordAuthenticationToken(username, password, Collections.emptyList());
 
         try {
             authenticationManager.authenticate(token);
-            //把用户信息保存在一个地方
-            //Cookie
+            // 把用户信息保存在一个地方
+            //   Cookie
             SecurityContextHolder.getContext().setAuthentication(token);
-            return new Result("ok", "登录成功", true, userService.getUserByUsername(username));
+
+            return LoginResult.success("登录成功", userService.getUserByUsername(username));
+        } catch (UsernameNotFoundException e) {
+            return LoginResult.failure("用户不存在");
         } catch (BadCredentialsException e) {
-            return Result.failure("密码不正确");
+            return LoginResult.failure("密码不正确");
         }
-
-
     }
-
-
 }
