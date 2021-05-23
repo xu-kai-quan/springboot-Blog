@@ -1,7 +1,5 @@
 package com.example.springboot.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-
 import java.time.Instant;
 
 public class Blog {
